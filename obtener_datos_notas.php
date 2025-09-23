@@ -43,7 +43,7 @@ try {
         sqlsrv_free_stmt($stmtVendedores);
     }
 
-    // CONSULTA 1: Cabecero filtrado por causa '01'
+    // CONSULTA 1: Cabecero filtrado por causa '01' (EXISTENTE - NO MODIFICAR)
     $queryCabecero = "SELECT 
                         h.C002110NDO as numero_documento,
                         h.C002110TDO as tipo_nota,
@@ -84,6 +84,27 @@ try {
     }
     $totalNotasCabecero = count($cabecerosFiltrados);
     sqlsrv_free_stmt($stmtCabecero);
+
+    // CONSULTA 1B: CABECERO ADICIONAL PARA VENDEDORES (SIN FILTRO DE CAUSA)
+    $queryCabeceroVendedores = "SELECT 
+                        h.C002110NDO as numero_documento,
+                        h.C002110CVE as codigo_vendedor
+                    FROM dbo.vwX002CF110H h
+                    WHERE CONVERT(varchar, h.C002110FAC, 23) BETWEEN ? AND ?
+                    AND h.ANNO >= '2024'";
+    
+    $stmtCabeceroVendedores = sqlsrv_query($conn, $queryCabeceroVendedores, array($fechaInicio, $fechaFin));
+    
+    if ($stmtCabeceroVendedores === false) {
+        throw new Exception('Error al ejecutar consulta cabecero vendedores: ' . print_r(sqlsrv_errors(), true));
+    }
+    
+    // Obtener cabeceros para vendedores (sin filtro de causa)
+    $cabecerosVendedores = [];
+    while ($row = sqlsrv_fetch_array($stmtCabeceroVendedores, SQLSRV_FETCH_ASSOC)) {
+        $cabecerosVendedores[$row['numero_documento']] = $row;
+    }
+    sqlsrv_free_stmt($stmtCabeceroVendedores);
 
     // CONSULTA 2: Detalle COMPLETO (sin filtrar por causa)
     $queryDetalleCompleto = "SELECT 
@@ -141,8 +162,11 @@ try {
         sqlsrv_free_stmt($stmtDepartamentos);
     }
 
-    // Procesar datos para el dashboard
+    // Procesar datos para el dashboard (EXISTENTE)
     $datosDashboard = procesarDatosParaDashboard($detalleCompleto, $cabecerosFiltrados, $agrupacion, $fechaInicio, $fechaFin, $vendedoresMap, $departamentosMap);
+    
+    // NUEVO: Procesar datos ESPECÍFICOS para vendedores (SIN filtro de causa)
+    $causasPorVendedor = obtenerCausasPorVendedor($detalleCompleto, $cabecerosVendedores, $vendedoresMap);
     
     // Devolver respuesta
     echo json_encode([
@@ -158,6 +182,7 @@ try {
         'causasCabeceroData' => $datosDashboard['causasCabeceroData'],
         'causasDetalleData' => $datosDashboard['causasDetalleData'],
         'vendedoresData' => $datosDashboard['vendedoresData'],
+        'causasPorVendedorData' => $causasPorVendedor, // NUEVO DATO
         'departamentosData' => $datosDashboard['departamentosData']
     ]);
     
@@ -166,8 +191,9 @@ try {
     echo json_encode(['success' => false, 'error' => $e->getMessage()]);
 }
 
-
-
+// ============================================================================
+// FUNCIONES EXISTENTES (NO MODIFICAR)
+// ============================================================================
 
 // Función para calcular notas por día
 function calcularNotasPorDia($totalNotas, $fechaInicio, $fechaFin) {
@@ -310,7 +336,7 @@ function obtenerDatosPorCausaDetalle($detalles) {
                 'codigo' => $codigoCausa,
                 'causa' => $descripcionCausa,
                 'descripcion' => $descripcionCausa,
-                'cantidad' => 0,  // Esto contará LÍNEAS
+                'cantidad' => 0,
                 'monto' => 0
             ];
         }
@@ -326,7 +352,7 @@ function obtenerDatosPorCausaDetalle($detalles) {
 // Función para obtener datos por vendedor (MEJORADA)
 function obtenerDatosPorVendedor($detalles, $cabeceros, $vendedoresMap) {
     $datosPorVendedor = [];
-    $causasPorVendedor = []; // Para almacenar causas por vendedor
+    $causasPorVendedor = [];
     
     foreach ($detalles as $detalle) {
         $numeroDocumento = $detalle['numero_documento'];
@@ -343,7 +369,7 @@ function obtenerDatosPorVendedor($detalles, $cabeceros, $vendedoresMap) {
                     'nombre' => $nombreVendedor,
                     'cantidad' => 0,
                     'monto' => 0,
-                    'causas' => [] // Array para almacenar causas específicas
+                    'causas' => []
                 ];
             }
             
@@ -374,7 +400,7 @@ function obtenerDatosPorVendedor($detalles, $cabeceros, $vendedoresMap) {
                 return $b['cantidad'] - $a['cantidad'];
             });
             $vendedor['causaPrincipal'] = $causas[0]['causa'];
-            $vendedor['causas'] = array_values($causas); // Convertir a array indexado
+            $vendedor['causas'] = array_values($causas);
         } else {
             $vendedor['causaPrincipal'] = 'N/A';
             $vendedor['causas'] = [];
@@ -384,9 +410,7 @@ function obtenerDatosPorVendedor($detalles, $cabeceros, $vendedoresMap) {
     return array_values($datosPorVendedor);
 }
 
-
-
-// NUEVA FUNCIÓN: Obtener datos por departamento
+// Función para obtener datos por departamento
 function obtenerDatosPorDepartamento($detalles, $departamentosMap) {
     $datosPorDepartamento = [];
     $causasPorDepartamento = [];
@@ -445,4 +469,55 @@ function procesarDatosParaDashboard($detalles, $cabeceros, $agrupacion, $fechaIn
     ];
 }
 
- 
+// ============================================================================
+// NUEVA FUNCIÓN: Obtener causas por vendedor (SIN FILTRO DE CAUSA)
+// ============================================================================
+
+function obtenerCausasPorVendedor($detalles, $cabecerosVendedores, $vendedoresMap) {
+    $vendedoresAgrupados = [];
+    
+    foreach ($detalles as $detalle) {
+        $numeroDocumento = $detalle['numero_documento'];
+        
+        // Usar cabeceros SIN filtro de causa
+        if (isset($cabecerosVendedores[$numeroDocumento])) {
+            $codigoVendedor = $cabecerosVendedores[$numeroDocumento]['codigo_vendedor'] ?? 'DESC';
+            $nombreVendedor = $vendedoresMap[$codigoVendedor] ?? "Vendedor $codigoVendedor";
+            $codigoCausa = $detalle['codigo_causa'] ?? 'DESC';
+            $descripcionCausa = $detalle['descripcion_causa'] ?? 'Desconocida';
+            
+            // Inicializar vendedor si no existe
+            if (!isset($vendedoresAgrupados[$codigoVendedor])) {
+                $vendedoresAgrupados[$codigoVendedor] = [
+                    'codigo' => $codigoVendedor,
+                    'nombre' => $nombreVendedor,
+                    'total_causas' => 0,
+                    'causas' => []
+                ];
+            }
+            
+            // Inicializar causa para este vendedor si no existe
+            if (!isset($vendedoresAgrupados[$codigoVendedor]['causas'][$codigoCausa])) {
+                $vendedoresAgrupados[$codigoVendedor]['causas'][$codigoCausa] = [
+                    'codigo' => $codigoCausa,
+                    'causa' => $descripcionCausa,
+                    'cantidad' => 0
+                ];
+            }
+            
+            // Contar causa para este vendedor
+            $vendedoresAgrupados[$codigoVendedor]['causas'][$codigoCausa]['cantidad']++;
+            $vendedoresAgrupados[$codigoVendedor]['total_causas']++;
+        }
+    }
+    
+    // Convertir a formato adecuado para el frontend
+    $resultado = [];
+    foreach ($vendedoresAgrupados as $vendedor) {
+        $vendedor['causas'] = array_values($vendedor['causas']);
+        $resultado[] = $vendedor;
+    }
+    
+    return $resultado;
+}
+?>
