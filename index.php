@@ -71,7 +71,7 @@
                     <div class="card-body">
                         <h5 class="metric-title">Total Facturas</h5>
                         <div class="metric-value" id="totalFacturas">0</div>
-                        <div id="variacionFacturas" class="positive-change">Cargando...</div>
+                        <div id="variacionFacturas" class="positive-change"></div>
                     </div>
                 </div>
             </div>
@@ -80,7 +80,7 @@
                     <div class="card-body">
                         <h5 class="metric-title">Total Notas</h5>
                         <div class="metric-value" id="totalNotas">0</div>
-                        <div id="variacionNotas" class="negative-change">Cargando...</div>
+                        <div id="variacionNotas" class="negative-change"></div>
                     </div>
                 </div>
             </div>
