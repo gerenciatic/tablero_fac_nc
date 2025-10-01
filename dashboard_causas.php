@@ -80,6 +80,16 @@
                     <i class="fas fa-search me-2"></i>Causas por Vendedor
                 </button>
             </li>
+
+
+                        <!-- En el ul de nav-tabs, después de la pestaña de Causas por Vendedor -->
+            <li class="nav-item" role="presentation">
+                <button class="nav-link" id="productos-tab" data-bs-toggle="tab" data-bs-target="#productos" type="button" role="tab">
+                    <i class="fas fa-boxes me-2"></i>Análisis de Productos
+                </button>
+            </li>
+
+
         </ul>
 
         <!-- Contenido de las pestañas -->
@@ -147,7 +157,7 @@
                     <div class="col-md-3">
                         <div class="card metric-card">
                             <div class="card-body">
-                                <h5 class="metric-title"><i class="fas fa-chart-line me-2"></i>Eficiencia</h5>
+                                <h5 class="metric-title"><i class="fas fa-chart-line me-2"></i>Eficiencia NC/NCDT</h5>
                                 <div class="metric-value" id="eficiencia">0%</div>
                                 <div class="text-muted">Rendimiento general</div>
                             </div>
@@ -453,7 +463,7 @@
                                                             <span id="vendedorTotalNotas">0</span>
                                                         </div>
                                                         <div class="col-6">
-                                                            <strong>Eficiencia:</strong>
+                                                            <strong>Eficiencia Item/NC:</strong>
                                                             <span id="vendedorEficiencia">0%</span>
                                                         </div>
                                                     </div>
@@ -463,7 +473,7 @@
                                                             <span id="vendedorCausaPrincipal">-</span>
                                                         </div>
                                                         <div class="col-6">
-                                                            <strong>Líneas/Nota:</strong>
+                                                            <strong>Item/Nota:</strong>
                                                             <span id="vendedorLineasNota">0.0</span>
                                                         </div>
                                                     </div>
@@ -509,6 +519,167 @@
                 </div>
             </div>
         </div>
+
+
+
+<!-- Pestaña de Análisis de Productos -->
+<div class="tab-pane fade" id="productos" role="tabpanel">
+    <div class="row mb-4">
+        <div class="col-md-12">
+            <div class="card">
+                <div class="card-header bg-info text-white">
+                    <h5 class="card-title mb-0">
+                        <i class="fas fa-boxes me-2"></i>Análisis de Productos por Causas
+                    </h5>
+                </div>
+                <div class="card-body">
+                    <!-- Filtros -->
+                    <div class="row mb-3">
+                        <div class="col-md-3">
+                            <label for="selectProducto" class="form-label">Seleccionar Producto:</label>
+                            <select id="selectProducto" class="form-select">
+                                <option value="">Todos los productos</option>
+                            </select>
+                        </div>
+                        <div class="col-md-3">
+                            <label for="selectCausaProducto" class="form-label">Filtrar por Causa:</label>
+                            <select id="selectCausaProducto" class="form-select">
+                                <option value="">Todas las causas</option>
+                            </select>
+                        </div>
+                        <div class="col-md-3">
+                            <label for="selectVendedorProducto" class="form-label">Filtrar por Vendedor:</label>
+                            <select id="selectVendedorProducto" class="form-select">
+                                <option value="">Todos los vendedores</option>
+                            </select>
+                        </div>
+                        <div class="col-md-3">
+                            <label for="selectDepartamentoProducto" class="form-label">Filtrar por Departamento:</label>
+                            <select id="selectDepartamentoProducto" class="form-select">
+                                <option value="">Todos los departamentos</option>
+                            </select>
+                        </div>
+                    </div>
+
+                     <!-- BOTÓN PARA LIMPIAR FILTROS - NUEVO -->
+                    <div class="row mb-4">
+                        <div class="col-md-12 text-end">
+                            <button class="btn btn-warning btn-sm" onclick="limpiarFiltrosProductos()">
+                                <i class="fas fa-eraser me-1"></i>Limpiar Filtros
+                            </button>
+                        </div>
+                    </div>
+
+
+
+                    <!-- Métricas -->
+                    <div class="row mb-4">
+                        <div class="col-md-3">
+                            <div class="card metric-card">
+                                <div class="card-body">
+                                    <h5 class="metric-title"><i class="fas fa-box me-2"></i>Total Productos</h5>
+                                    <div class="metric-value" id="totalProductos">0</div>
+                                    <div class="text-muted">Productos únicos</div>
+                                </div>
+                            </div>
+                        </div>
+                        <div class="col-md-3">
+                            <div class="card metric-card">
+                                <div class="card-body">
+                                    <h5 class="metric-title"><i class="fas fa-exchange-alt me-2"></i>Notas con Productos</h5>
+                                    <div class="metric-value" id="notasConProductos">0</div>
+                                    <div class="text-muted">Documentos afectados</div>
+                                </div>
+                            </div>
+                        </div>
+                        <div class="col-md-3">
+                            <div class="card metric-card">
+                                <div class="card-body">
+                                    <h5 class="metric-title"><i class="fas fa-exclamation-triangle me-2"></i>Producto Más Problemático</h5>
+                                    <div class="metric-value" id="productoProblematico">-</div>
+                                    <div class="text-muted">Más notas</div>
+                                </div>
+                            </div>
+                        </div>
+                        <div class="col-md-3">
+                            <div class="card metric-card">
+                                <div class="card-body">
+                                    <h5 class="metric-title"><i class="fas fa-chart-pie me-2"></i>Causa Principal</h5>
+                                    <div class="metric-value" id="causaPrincipalProductos">-</div>
+                                    <div class="text-muted">En productos</div>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+
+                    <!-- Gráficos -->
+                    <div class="row mb-4">
+                        <div class="col-md-8">
+                            <div class="card">
+                                <div class="card-header">
+                                    <i class="fas fa-chart-bar me-2"></i>Top 10 Productos con Más Notas
+                                </div>
+                                <div class="card-body">
+                                    <div class="chart-container">
+                                        <canvas id="topProductosChart"></canvas>
+                                    </div>
+                                </div>
+                            </div>
+                        </div>
+                        <div class="col-md-4">
+                            <div class="card">
+                                <div class="card-header">
+                                    <i class="fas fa-chart-pie me-2"></i>Distribución por Departamento
+                                </div>
+                                <div class="card-body">
+                                    <div class="chart-container">
+                                        <canvas id="departamentoProductosChart"></canvas>
+                                    </div>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+
+                    <!-- Tabla -->
+                    <div class="row">
+                        <div class="col-md-12">
+                            <div class="card">
+                                <div class="card-header bg-warning text-dark">
+                                    <h6 class="card-title mb-0">Detalle de Productos por Causas</h6>
+                                </div>
+                                <div class="card-body">
+                                    <div class="table-responsive">
+                                        <table class="table table-striped table-bordered table-hover">
+                                            <thead class="table-dark">
+                                                <tr>
+                                                    <th>Código Producto</th>
+                                                    <th>Descripción</th>
+                                                    <th>Causa</th>
+                                                    <th>Vendedor</th>
+                                                    <th>Departamento</th>
+                                                    <th>Cantidad</th>
+                                                 
+                                                </tr>
+                                            </thead>
+                                            <tbody id="tablaProductos">
+                                                <tr>
+                                                    <td colspan="8" class="text-center">Cargando datos de productos...</td>
+                                                </tr>
+                                            </tbody>
+                                        </table>
+                                    </div>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+</div>
+
+
+
 
         <!-- Estado de carga -->
         <div class="row mt-4" id="estadoCarga">

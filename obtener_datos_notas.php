@@ -43,6 +43,25 @@ try {
         sqlsrv_free_stmt($stmtVendedores);
     }
 
+    // NUEVA CONSULTA: Obtener descripciones de productos del MAESTRO_PRODUCTO
+    $queryProductos = "SELECT 
+                        A00203CPR as codigo_producto,
+                        A00203DEL as descripcion_producto
+                      FROM dbo.MAESTRO_PRODUCTO 
+                      WHERE A00203STS = '1'";  // Solo productos activos
+    
+    $stmtProductos = sqlsrv_query($conn, $queryProductos);
+    
+    $productosMap = [];
+    if ($stmtProductos !== false) {
+        while ($row = sqlsrv_fetch_array($stmtProductos, SQLSRV_FETCH_ASSOC)) {
+            $codigo = $row['codigo_producto'] ?? 'SIN_CODIGO';
+            $descripcion = $row['descripcion_producto'] ?? 'Producto sin descripción';
+            $productosMap[$codigo] = $descripcion;
+        }
+        sqlsrv_free_stmt($stmtProductos);
+    }
+    
     // CONSULTA 1: Cabecero filtrado por causa '01' (EXISTENTE - NO MODIFICAR)
     $queryCabecero = "SELECT 
                         h.C002110NDO as numero_documento,
@@ -56,6 +75,7 @@ try {
                     FROM dbo.vwX002CF110H h
                     INNER JOIN dbo.vwX002AF035 c ON h.C002110CCN = c.A002035CCN
                     WHERE CONVERT(varchar, h.C002110FAC, 23) BETWEEN ? AND ?
+                    AND h.C002110TDO = 'NC'
                     AND h.ANNO >= '2024'
                     AND h.C002110CCN ='01'
                     AND c.A002035DEL IS NOT NULL";
@@ -107,25 +127,34 @@ try {
     sqlsrv_free_stmt($stmtCabeceroVendedores);
 
     // CONSULTA 2: Detalle COMPLETO (sin filtrar por causa)
-    $queryDetalleCompleto = "SELECT 
-                        d.C002111NDO as numero_documento,
-                        d.C002111CPR as codigo_producto,
-                        d.C002111CRE as codigo_causa_detalle,
-                        cd.A00236CRE as codigo_causa,
-                        cd.A00236DEL as descripcion_causa,
-                        cd.A00236DPT as codigo_departamento,
-                        CONVERT(varchar, d.C002111FAC, 23) as fecha_detalle,
-                        d.C002111UVE as unidad_vendida,
-                        d.C002111PIM as monto,
-                        d.C002111BPR as cantidad,
-                        d.C002111PPR as precio_unitario,
-                        d.C002111BDE as descuento,
-                        d.C002111BPP as precio_neto,
-                        d.C002111MNE as monto_neto
-                    FROM dbo.vwX002CF111H d
-                    INNER JOIN dbo.vwX002AF036 cd ON d.C002111CRE = cd.A00236CRE
-                    WHERE CONVERT(varchar, d.C002111FAC, 23) BETWEEN ? AND ?
-                    AND cd.A00236DEL IS NOT NULL";
+    $queryDetalleCompleto = "SELECT
+    c.C002110TDO AS documento,
+    c.C002110CVE AS cod_vendedor,
+	d.C002111NDO AS numero_documento, 
+	d.C002111CPR AS codigo_producto, 
+	d.C002111CRE AS codigo_causa_detalle, 
+	cd.A00236CRE AS codigo_causa, 
+	cd.A00236DEL AS descripcion_causa, 
+	cd.A00236DPT AS codigo_departamento, 
+	CONVERT (VARCHAR, d.C002111FAC, 23) AS fecha_detalle, 
+	d.C002111UVE AS unidad_vendida, 
+	d.C002111PIM AS monto, 
+	d.C002111BPR AS cantidad, 
+	d.C002111PPR AS precio_unitario, 
+	d.C002111BDE AS descuento, 
+	d.C002111BPP AS precio_neto, 
+	d.C002111MNE AS monto_neto
+	
+FROM
+	dbo.vwX002CF111H AS d
+	INNER JOIN dbo.vwX002AF036 AS cd ON d.C002111CRE = cd.A00236CRE
+  
+	LEFT  JOIN dbo.vwX002CF110H AS c ON d.C002111NDO = c.C002110NDO
+WHERE
+	CONVERT (VARCHAR, d.C002111FAC, 23) BETWEEN ? AND ? 
+    AND c.C002110TDO = 'NC'
+    AND d.C002111CPR  NOT IN ('001')
+    AND	cd.A00236DEL IS NOT NULL";
     
     // Preparar consulta detalle
     $paramsDetalle = array($fechaInicio, $fechaFin);
@@ -167,6 +196,10 @@ try {
     
     // NUEVO: Procesar datos ESPECÍFICOS para vendedores (SIN filtro de causa)
     $causasPorVendedor = obtenerCausasPorVendedor($detalleCompleto, $cabecerosVendedores, $vendedoresMap);
+
+    // NUEVO: Procesar datos para productos - PASAR el mapa de productos
+    $productosData = obtenerDatosProductos($detalleCompleto, $cabecerosVendedores, $vendedoresMap, $departamentosMap, $productosMap);
+
     
     // Devolver respuesta
     echo json_encode([
@@ -182,8 +215,9 @@ try {
         'causasCabeceroData' => $datosDashboard['causasCabeceroData'],
         'causasDetalleData' => $datosDashboard['causasDetalleData'],
         'vendedoresData' => $datosDashboard['vendedoresData'],
-        'causasPorVendedorData' => $causasPorVendedor, // NUEVO DATO
-        'departamentosData' => $datosDashboard['departamentosData']
+        'causasPorVendedorData' => $causasPorVendedor,
+        'departamentosData' => $datosDashboard['departamentosData'],
+        'productosData' => $productosData
     ]);
     
 } catch (Exception $e) {
@@ -349,16 +383,52 @@ function obtenerDatosPorCausaDetalle($detalles) {
     return array_values($datosPorCausa);
 }
 
-// Función para obtener datos por vendedor (MEJORADA)
+
+
+
+
+
+// Función para obtener datos por vendedor (CORREGIDA)
 function obtenerDatosPorVendedor($detalles, $cabeceros, $vendedoresMap) {
     $datosPorVendedor = [];
-    $causasPorVendedor = [];
     
     foreach ($detalles as $detalle) {
         $numeroDocumento = $detalle['numero_documento'];
         if (isset($cabeceros[$numeroDocumento])) {
             $codigoVendedor = $cabeceros[$numeroDocumento]['codigo_vendedor'] ?? 'DESC';
-            $nombreVendedor = isset($vendedoresMap[$codigoVendedor]) ? trim($vendedoresMap[$codigoVendedor]) : "Vendedor $codigoVendedor";
+            
+            // DEBUG: Ver qué código estamos obteniendo
+            error_log("Código vendedor obtenido: " . $codigoVendedor);
+            
+            // BUSCAR EL NOMBRE DIRECTAMENTE EN EL MAPA CON DIFERENTES FORMATOS
+            $nombreVendedor = "Vendedor $codigoVendedor"; // Valor por defecto
+            
+            // Intentar diferentes formatos de búsqueda
+            if (isset($vendedoresMap[$codigoVendedor])) {
+                $nombreVendedor = trim($vendedoresMap[$codigoVendedor]);
+            } else {
+                // Buscar con formato 2 dígitos
+                $codigoCon2Digitos = str_pad($codigoVendedor, 2, '0', STR_PAD_LEFT);
+                if (isset($vendedoresMap[$codigoCon2Digitos])) {
+                    $nombreVendedor = trim($vendedoresMap[$codigoCon2Digitos]);
+                } else {
+                    // Buscar sin ceros a la izquierda
+                    $codigoSinCeros = ltrim($codigoVendedor, '0');
+                    if (isset($vendedoresMap[$codigoSinCeros])) {
+                        $nombreVendedor = trim($vendedoresMap[$codigoSinCeros]);
+                    } else {
+                        // Buscar como número
+                        $codigoNumerico = intval($codigoVendedor);
+                        if (isset($vendedoresMap[$codigoNumerico])) {
+                            $nombreVendedor = trim($vendedoresMap[$codigoNumerico]);
+                        }
+                    }
+                }
+            }
+            
+            // DEBUG: Ver qué nombre se asignó
+            error_log("Código: $codigoVendedor => Nombre: $nombreVendedor");
+            
             $causaCodigo = $detalle['codigo_causa'] ?? 'DESC';
             $causaDescripcion = $detalle['descripcion_causa'] ?? 'Desconocida';
             $monto = floatval($detalle['monto'] ?? 0);
@@ -409,6 +479,11 @@ function obtenerDatosPorVendedor($detalles, $cabeceros, $vendedoresMap) {
     
     return array_values($datosPorVendedor);
 }
+
+
+
+
+
 
 // Función para obtener datos por departamento
 function obtenerDatosPorDepartamento($detalles, $departamentosMap) {
@@ -473,43 +548,82 @@ function procesarDatosParaDashboard($detalles, $cabeceros, $agrupacion, $fechaIn
 // NUEVA FUNCIÓN: Obtener causas por vendedor (SIN FILTRO DE CAUSA)
 // ============================================================================
 
+
 function obtenerCausasPorVendedor($detalles, $cabecerosVendedores, $vendedoresMap) {
-    $vendedoresAgrupados = [];
+    error_log('=== INICIANDO obtenerCausasPorVendedor ===');
+    error_log('Total detalles: ' . count($detalles));
     
-    foreach ($detalles as $detalle) {
-        $numeroDocumento = $detalle['numero_documento'];
+    $vendedoresAgrupados = [];
+    $vendedoresNoEncontrados = [];
+    $detallesSinVendedor = 0;
+    $vendedoresEncontrados = [];
+    
+    foreach ($detalles as $index => $detalle) {
+        // ✅ USAR DIRECTAMENTE EL CÓDIGO DEL VENDEDOR DEL DETALLE
+        $codigoVendedorRaw = $detalle['cod_vendedor'] ?? null;
         
-        // Usar cabeceros SIN filtro de causa
-        if (isset($cabecerosVendedores[$numeroDocumento])) {
-            $codigoVendedor = $cabecerosVendedores[$numeroDocumento]['codigo_vendedor'] ?? 'DESC';
-            $nombreVendedor = $vendedoresMap[$codigoVendedor] ?? "Vendedor $codigoVendedor";
-            $codigoCausa = $detalle['codigo_causa'] ?? 'DESC';
-            $descripcionCausa = $detalle['descripcion_causa'] ?? 'Desconocida';
-            
-            // Inicializar vendedor si no existe
-            if (!isset($vendedoresAgrupados[$codigoVendedor])) {
-                $vendedoresAgrupados[$codigoVendedor] = [
-                    'codigo' => $codigoVendedor,
-                    'nombre' => $nombreVendedor,
-                    'total_causas' => 0,
-                    'causas' => []
-                ];
-            }
-            
-            // Inicializar causa para este vendedor si no existe
-            if (!isset($vendedoresAgrupados[$codigoVendedor]['causas'][$codigoCausa])) {
-                $vendedoresAgrupados[$codigoVendedor]['causas'][$codigoCausa] = [
-                    'codigo' => $codigoCausa,
-                    'causa' => $descripcionCausa,
-                    'cantidad' => 0
-                ];
-            }
-            
-            // Contar causa para este vendedor
-            $vendedoresAgrupados[$codigoVendedor]['causas'][$codigoCausa]['cantidad']++;
-            $vendedoresAgrupados[$codigoVendedor]['total_causas']++;
+        if (empty($codigoVendedorRaw)) {
+            $detallesSinVendedor++;
+            continue;
+        }
+        
+        // ✅ MEJOR NORMALIZACIÓN
+        $codigoVendedorNormalizado = normalizarCodigoVendedor($codigoVendedorRaw);
+        
+        // Buscar en el mapa con diferentes formatos
+        $nombreVendedor = buscarVendedorEnMapa($codigoVendedorRaw, $vendedoresMap);
+        
+        if (strpos($nombreVendedor, 'Vendedor ') === 0) {
+            // No se encontró en el mapa
+            $vendedoresNoEncontrados[$codigoVendedorRaw] = ($vendedoresNoEncontrados[$codigoVendedorRaw] ?? 0) + 1;
+        } else {
+            $vendedoresEncontrados[$codigoVendedorRaw] = $nombreVendedor;
+        }
+        
+        $codigoCausa = $detalle['codigo_causa'] ?? 'DESC';
+        $descripcionCausa = $detalle['descripcion_causa'] ?? 'Desconocida';
+        
+        // Usar el código original para consistencia
+        if (!isset($vendedoresAgrupados[$codigoVendedorRaw])) {
+            $vendedoresAgrupados[$codigoVendedorRaw] = [
+                'codigo' => $codigoVendedorRaw,
+                'nombre' => $nombreVendedor,
+                'total_causas' => 0,
+                'causas' => []
+            ];
+        }
+        
+        if (!isset($vendedoresAgrupados[$codigoVendedorRaw]['causas'][$codigoCausa])) {
+            $vendedoresAgrupados[$codigoVendedorRaw]['causas'][$codigoCausa] = [
+                'codigo' => $codigoCausa,
+                'causa' => $descripcionCausa,
+                'cantidad' => 0
+            ];
+        }
+        
+        $vendedoresAgrupados[$codigoVendedorRaw]['causas'][$codigoCausa]['cantidad']++;
+        $vendedoresAgrupados[$codigoVendedorRaw]['total_causas']++;
+        
+        // Debug de los primeros 5 registros
+        if ($index < 5) {
+            error_log("Detalle $index - Código: '$codigoVendedorRaw', Normalizado: '$codigoVendedorNormalizado', Nombre: '$nombreVendedor'");
         }
     }
+    
+    // Logs de diagnóstico
+    error_log("=== RESUMEN VENDEDORES ===");
+    error_log("Detalles sin vendedor: $detallesSinVendedor");
+    error_log("Vendedores encontrados: " . count($vendedoresEncontrados));
+    error_log("Vendedores no encontrados: " . count($vendedoresNoEncontrados));
+    
+    if (!empty($vendedoresEncontrados)) {
+        error_log("Vendedores encontrados: " . json_encode($vendedoresEncontrados));
+    }
+    if (!empty($vendedoresNoEncontrados)) {
+        error_log('Vendedores no encontrados: ' . json_encode($vendedoresNoEncontrados));
+    }
+    
+    error_log("Vendedores agrupados: " . count($vendedoresAgrupados));
     
     // Convertir a formato adecuado para el frontend
     $resultado = [];
@@ -520,4 +634,100 @@ function obtenerCausasPorVendedor($detalles, $cabecerosVendedores, $vendedoresMa
     
     return $resultado;
 }
+
+// Función auxiliar para normalizar códigos
+function normalizarCodigoVendedor($codigo) {
+    if (is_numeric($codigo)) {
+        return str_pad(strval($codigo), 2, '0', STR_PAD_LEFT);
+    }
+    return strtoupper(trim(strval($codigo)));
+}
+
+// Función auxiliar para buscar vendedor con diferentes formatos
+function buscarVendedorEnMapa($codigo, $vendedoresMap) {
+    // Intentar con el código original
+    if (isset($vendedoresMap[$codigo])) {
+        return $vendedoresMap[$codigo];
+    }
+    
+    // Normalizar y buscar
+    $codigoNormalizado = normalizarCodigoVendedor($codigo);
+    if (isset($vendedoresMap[$codigoNormalizado])) {
+        return $vendedoresMap[$codigoNormalizado];
+    }
+    
+    // Buscar como número
+    if (is_numeric($codigo)) {
+        $codigoNum = intval($codigo);
+        if (isset($vendedoresMap[$codigoNum])) {
+            return $vendedoresMap[$codigoNum];
+        }
+        
+        // Buscar como string sin ceros
+        $codigoSinCeros = strval($codigoNum);
+        if (isset($vendedoresMap[$codigoSinCeros])) {
+            return $vendedoresMap[$codigoSinCeros];
+        }
+    }
+    
+    return "Vendedor $codigo";
+}
+
+
+
+
+
+// ============================================================================
+// NUEVA FUNCIÓN: Obtener datos de productos por causa (USANDO FUNCIÓN AUXILIAR)
+// ============================================================================
+function obtenerDatosProductos($detalles, $cabecerosVendedores, $vendedoresMap, $departamentosMap, $productosMap) {
+    $productosAgrupados = [];
+    
+    foreach ($detalles as $detalle) {
+        $codigoProducto = $detalle['codigo_producto'] ?? 'SIN_CODIGO';
+        
+        // OBTENER DESCRIPCIÓN CORRECTA DEL PRODUCTO DEL MAESTRO
+        $descripcionProducto = isset($productosMap[$codigoProducto]) ? 
+            $productosMap[$codigoProducto] : 'Producto ' . $codigoProducto;
+        
+        $codigoCausa = $detalle['codigo_causa'] ?? 'DESC';
+        $descripcionCausa = $detalle['descripcion_causa'] ?? 'Desconocida';
+        $codigoDepartamento = $detalle['codigo_departamento'] ?? 'SIN_DEPARTAMENTO';
+        $descripcionDepartamento = $departamentosMap[$codigoDepartamento] ?? "Departamento $codigoDepartamento";
+        
+        // ✅ USAR DIRECTAMENTE EL CÓDIGO DEL VENDEDOR DEL DETALLE
+        $codigoVendedorRaw = $detalle['cod_vendedor'] ?? 'DESC';
+        
+        // ✅ USAR LA FUNCIÓN AUXILIAR EXISTENTE PARA BUSCAR EL NOMBRE
+        $nombreVendedor = buscarVendedorEnMapa($codigoVendedorRaw, $vendedoresMap);
+        
+        // Clave única para producto-causa-vendedor
+        $clave = $codigoProducto . '_' . $codigoCausa . '_' . $codigoVendedorRaw;
+        
+        if (!isset($productosAgrupados[$clave])) {
+            $productosAgrupados[$clave] = [
+                'codigo' => $codigoProducto,
+                'descripcion' => $descripcionProducto,
+                'causa' => $descripcionCausa,
+                'codigo_causa' => $codigoCausa,
+                'vendedor' => $nombreVendedor, // ✅ AHORA CON EL NOMBRE CORRECTO
+                'codigo_vendedor' => $codigoVendedorRaw,
+                'departamento' => $descripcionDepartamento,
+                'codigo_departamento' => $codigoDepartamento,
+                'cantidad' => 0,
+                'monto' => 0
+            ];
+        }
+        
+        $productosAgrupados[$clave]['cantidad']++;
+        $productosAgrupados[$clave]['monto'] += floatval($detalle['monto'] ?? 0);
+    }
+    
+    return array_values($productosAgrupados);
+}
+
+
+
+
+
 ?>
